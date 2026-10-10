@@ -650,31 +650,108 @@ export default function AdminView({
                       </td>
                     </tr>
                   ) : (
-                    attendanceRecords.map((r) => (
-                      <tr key={r.id} className="hover:bg-slate-50">
-                        <td className="py-3 px-4 font-medium text-slate-900">{r.date}</td>
-                        <td className="py-3 px-3 font-bold">{r.empName}</td>
-                        <td className="py-3 px-3 text-slate-500">{r.workType}</td>
-                        <td className="py-3 px-3 font-semibold text-slate-800">{r.checkInTime}</td>
-                        <td className="py-3 px-3 font-semibold text-slate-800">{r.checkOutTime}</td>
-                        <td className="py-3 px-3 text-slate-500">{r.breakMinutes || 0}분</td>
-                        <td className="py-3 px-3 font-bold text-emerald-700">{r.actualWorkHours}h</td>
-                        <td className="py-3 px-3 text-slate-600">{(r.hourlyWage || 0).toLocaleString()}원</td>
-                        <td className="py-3 px-3 font-bold text-slate-900">{(r.dailyPay || 0).toLocaleString()}원</td>
-                        <td className="py-3 px-4 text-slate-500 max-w-xs truncate">{r.note || '-'}</td>
-                        <td className="py-3 px-3 text-center">
-                          <button
-                            onClick={() => {
-                              setEditingRecord({ ...r });
-                              setEditReason('');
-                            }}
-                            className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold"
-                          >
-                            수정
-                          </button>
-                        </td>
-                      </tr>
-                    ))
+                    // 날짜별 그룹핑 및 내림차순(최신순) 정렬
+                    (() => {
+                      const grouped = attendanceRecords.reduce((acc, r) => {
+                        const d = r.date || '날짜 미지정';
+                        if (!acc[d]) acc[d] = [];
+                        acc[d].push(r);
+                        return acc;
+                      }, {});
+
+                      const sortedDates = Object.keys(grouped).sort(
+                        (a, b) => new Date(b) - new Date(a)
+                      );
+
+                      return sortedDates.map((dateStr) => {
+                        const dayRecords = grouped[dateStr];
+                        const totalDayHours = dayRecords.reduce(
+                          (sum, r) => sum + (r.actualWorkHours || 0),
+                          0
+                        );
+                        const dateObj = new Date(dateStr);
+                        const dayOfWeek =
+                          ['일', '월', '화', '수', '목', '금', '토'][dateObj.getDay()] || '';
+                        const isWeekend =
+                          dateObj.getDay() === 0 || dateObj.getDay() === 6;
+
+                        return (
+                          <React.Fragment key={dateStr}>
+                            {/* [일별 시각적 구분선 & 날짜 헤더 라인] */}
+                            <tr className="bg-amber-50/70 border-t-2 border-b border-amber-200/80">
+                              <td colSpan={11} className="py-2.5 px-4">
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2.5">
+                                    <div className="w-2 h-2 rounded-full bg-amber-500" />
+                                    <span className="text-xs font-black text-slate-900 tracking-tight">
+                                      📅 {dateStr}
+                                      <span
+                                        className={`ml-1 font-bold ${
+                                          isWeekend ? 'text-rose-600' : 'text-slate-600'
+                                        }`}
+                                      >
+                                        ({dayOfWeek}요일)
+                                      </span>
+                                    </span>
+                                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-white border border-amber-200 font-bold text-amber-900 shadow-xs">
+                                      근무 파트너 {dayRecords.length}명
+                                    </span>
+                                  </div>
+                                  <div className="text-xs text-slate-600 font-semibold">
+                                    당일 총 실근무시간: <strong className="text-emerald-700 font-bold">{totalDayHours.toFixed(1)}시간</strong>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+
+                            {/* 당일 직원별 출퇴근 기록 행 */}
+                            {dayRecords.map((r) => (
+                              <tr key={r.id} className="hover:bg-slate-50/80 bg-white">
+                                <td className="py-3 px-4 font-semibold text-slate-500">
+                                  {r.date}
+                                </td>
+                                <td className="py-3 px-3 font-bold text-slate-900">
+                                  {r.empName}
+                                </td>
+                                <td className="py-3 px-3 text-slate-500">{r.workType}</td>
+                                <td className="py-3 px-3 font-semibold text-slate-800">
+                                  {r.checkInTime}
+                                </td>
+                                <td className="py-3 px-3 font-semibold text-slate-800">
+                                  {r.checkOutTime}
+                                </td>
+                                <td className="py-3 px-3 text-slate-500">
+                                  {r.breakMinutes || 0}분
+                                </td>
+                                <td className="py-3 px-3 font-bold text-emerald-700">
+                                  {r.actualWorkHours}h
+                                </td>
+                                <td className="py-3 px-3 text-slate-600">
+                                  {(r.hourlyWage || 0).toLocaleString()}원
+                                </td>
+                                <td className="py-3 px-3 font-bold text-slate-900">
+                                  {(r.dailyPay || 0).toLocaleString()}원
+                                </td>
+                                <td className="py-3 px-4 text-slate-500 max-w-xs truncate">
+                                  {r.note || '-'}
+                                </td>
+                                <td className="py-3 px-3 text-center">
+                                  <button
+                                    onClick={() => {
+                                      setEditingRecord({ ...r });
+                                      setEditReason('');
+                                    }}
+                                    className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold shadow-xs"
+                                  >
+                                    수정
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </React.Fragment>
+                        );
+                      });
+                    })()
                   )}
                 </tbody>
               </table>
