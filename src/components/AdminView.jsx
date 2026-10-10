@@ -28,7 +28,9 @@ import {
   getAge,
   getTenureMonths,
   truncateTenWon,
+  calculateDailyRecord,
 } from '../utils/calculator';
+import { syncRecordToGoogleSheets } from '../utils/storage';
 
 export default function AdminView({
   settings,
@@ -49,6 +51,9 @@ export default function AdminView({
   // 수정용 모달 상태
   const [editingRecord, setEditingRecord] = useState(null);
   const [editReason, setEditReason] = useState('');
+
+  // 누락 기록 수동 등록 모달 상태
+  const [newManualRecord, setNewManualRecord] = useState(null);
 
   // 직원 편집 모달
   const [editingEmp, setEditingEmp] = useState(null);
@@ -278,6 +283,63 @@ export default function AdminView({
     onSaveAttendanceRecords(updated);
     setEditingRecord(null);
     setEditReason('');
+  };
+
+  // 누락된 기록 수동 등록 저장 핸들러
+  const handleSaveManualRecord = () => {
+    if (!newManualRecord.empId) {
+      alert('직원을 선택해주세요.');
+      return;
+    }
+    if (!newManualRecord.date) {
+      alert('근무 일자를 선택해주세요.');
+      return;
+    }
+    if (!newManualRecord.checkInTime || !newManualRecord.checkOutTime) {
+      alert('출퇴근 시간을 모두 입력해주세요.');
+      return;
+    }
+    if (!newManualRecord.reason?.trim()) {
+      alert('수동 등록 사유(예: 직원 타각 누락 확인 후 보정)를 입력해주세요.');
+      return;
+    }
+
+    const emp = employees.find((e) => e.id === newManualRecord.empId);
+    if (!emp) return;
+    const workType = workTypes.find((w) => w.id === emp.workTypeId);
+
+    const calc = calculateDailyRecord({
+      checkInTime: newManualRecord.checkInTime,
+      checkOutTime: newManualRecord.checkOutTime,
+      breakMinutes: Number(newManualRecord.breakMinutes) || 0,
+      hourlyWage: emp.hourlyWage,
+      isUnderFive: settings.isUnderFiveEmployees,
+    });
+
+    const record = {
+      id: `REC-${newManualRecord.date}-${Date.now().toString().slice(-4)}`,
+      date: newManualRecord.date,
+      empId: emp.id,
+      empName: emp.name,
+      workType: workType?.name || '파트너',
+      checkInTime: newManualRecord.checkInTime,
+      checkOutTime: newManualRecord.checkOutTime,
+      breakMinutes: Number(newManualRecord.breakMinutes) || 0,
+      actualWorkHours: calc.actualWorkHours,
+      hourlyWage: emp.hourlyWage,
+      dailyPay: calc.dailyPay,
+      overtimePay: calc.overtimePay,
+      nightPay: calc.nightPay,
+      workCategory: '정상출근',
+      isApproved: true,
+      note: `[관리자 수동등록] ${newManualRecord.reason}`,
+    };
+
+    const nextRecords = [record, ...attendanceRecords];
+    onSaveAttendanceRecords(nextRecords);
+    syncRecordToGoogleSheets(record, settings.googleScriptUrl);
+    setNewManualRecord(null);
+    alert(`${emp.name} 파트너의 ${newManualRecord.date} 출퇴근 기록이 정상 등록되었습니다.`);
   };
 
   // 조기 출근 원클릭 승인
@@ -510,13 +572,31 @@ export default function AdminView({
                   직원들이 타각한 모든 기록과 사장님의 수정 사유 로그가 투명하게 보존됩니다.
                 </p>
               </div>
-              <button
-                onClick={handleDownloadExcel}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm"
-              >
-                <Download className="w-4 h-4" />
-                엑셀 파일로 다운로드
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() =>
+                    setNewManualRecord({
+                      date: new Date().toISOString().split('T')[0],
+                      empId: employees.filter((e) => e.isActive)[0]?.id || '',
+                      checkInTime: '13:00',
+                      checkOutTime: '18:00',
+                      breakMinutes: 30,
+                      reason: '',
+                    })
+                  }
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-black text-white text-xs font-bold shadow-sm"
+                >
+                  <Plus className="w-4 h-4 text-amber-400" />
+                  누락된 기록 수동 등록
+                </button>
+                <button
+                  onClick={handleDownloadExcel}
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm"
+                >
+                  <Download className="w-4 h-4" />
+                  엑셀 파일로 다운로드
+                </button>
+              </div>
             </div>
 
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
@@ -1078,6 +1158,17 @@ export default function AdminView({
 
             <div className="space-y-3 mb-4 text-xs">
               <div>
+                <label className="font-bold text-slate-700 block mb-1">근무 일자</label>
+                <input
+                  type="date"
+                  value={editingRecord.date}
+                  onChange={(e) =>
+                    setEditingRecord({ ...editingRecord, date: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border rounded-xl font-bold"
+                />
+              </div>
+              <div>
                 <label className="font-bold text-slate-700 block mb-1">출근 시각</label>
                 <input
                   type="time"
@@ -1145,7 +1236,135 @@ export default function AdminView({
         </div>
       )}
 
-      {/* 직원 등록/수정 모달 */}
+      {/* 누락된 출퇴근 기록 수동 등록 모달 (사장 전용) */}
+      {newManualRecord && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 animate-in fade-in zoom-in duration-150">
+            <div className="flex justify-between items-start mb-2">
+              <div>
+                <span className="text-[11px] px-2 py-0.5 rounded-full font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                  사장님 전용 소급 입력
+                </span>
+                <h3 className="text-lg font-bold text-slate-900 mt-1">
+                  누락된 출퇴근 기록 수동 등록
+                </h3>
+              </div>
+              <button
+                onClick={() => setNewManualRecord(null)}
+                className="text-slate-400 hover:text-slate-600 font-bold"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mb-4">
+              직원이 타각을 깜빡한 날짜와 시간을 입력하면 급여 및 주휴수당에 즉시 반영됩니다.
+            </p>
+
+            <div className="space-y-3 mb-5 text-xs">
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">직원 선택</label>
+                <select
+                  value={newManualRecord.empId}
+                  onChange={(e) =>
+                    setNewManualRecord({ ...newManualRecord, empId: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border rounded-xl font-bold bg-white"
+                >
+                  {employees
+                    .filter((e) => e.isActive)
+                    .map((e) => (
+                      <option key={e.id} value={e.id}>
+                        {e.name} ({workTypes.find((w) => w.id === e.workTypeId)?.name})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">근무 일자 (날짜 지정)</label>
+                <input
+                  type="date"
+                  value={newManualRecord.date}
+                  onChange={(e) =>
+                    setNewManualRecord({ ...newManualRecord, date: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border rounded-xl font-bold text-slate-900"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">출근 시각</label>
+                  <input
+                    type="time"
+                    value={newManualRecord.checkInTime}
+                    onChange={(e) =>
+                      setNewManualRecord({ ...newManualRecord, checkInTime: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border rounded-xl font-bold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="font-bold text-slate-700 block mb-1">퇴근 시각</label>
+                  <input
+                    type="time"
+                    value={newManualRecord.checkOutTime}
+                    onChange={(e) =>
+                      setNewManualRecord({ ...newManualRecord, checkOutTime: e.target.value })
+                    }
+                    className="w-full px-3 py-2 border rounded-xl font-bold text-slate-900"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">휴게시간 (분)</label>
+                <input
+                  type="number"
+                  value={newManualRecord.breakMinutes}
+                  onChange={(e) =>
+                    setNewManualRecord({
+                      ...newManualRecord,
+                      breakMinutes: Number(e.target.value),
+                    })
+                  }
+                  className="w-full px-3 py-2 border rounded-xl font-bold text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="font-bold text-amber-900 block mb-1">
+                  수동 등록 사유 (필수 입력)
+                </label>
+                <input
+                  type="text"
+                  placeholder="예: 어제 출근 타각 누락 사유 확인 후 수동 입력"
+                  value={newManualRecord.reason}
+                  onChange={(e) =>
+                    setNewManualRecord({ ...newManualRecord, reason: e.target.value })
+                  }
+                  className="w-full px-3 py-2 border border-amber-300 rounded-xl bg-amber-50/50 text-slate-900 font-medium"
+                />
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setNewManualRecord(null)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100"
+              >
+                취소
+              </button>
+              <button
+                onClick={handleSaveManualRecord}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-900 hover:bg-black text-white shadow-sm"
+              >
+                기록 등록 완료
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {editingEmp && (
         <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-white rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 max-h-[90vh] overflow-y-auto">
