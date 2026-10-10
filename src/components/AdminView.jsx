@@ -406,19 +406,6 @@ export default function AdminView({
               );
             })}
           </div>
-
-          {/* 구글 시트 원클릭 바로가기 버튼 */}
-          <a
-            href={settings.googleSheetDocUrl || "https://docs.google.com/spreadsheets/"}
-            target="_blank"
-            rel="noreferrer"
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-bold shadow-sm transition whitespace-nowrap"
-            title="구글 스프레드시트 새 창 열기"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
-            <span>구글시트 바로가기</span>
-            <ExternalLink className="w-3.5 h-3.5 text-emerald-200" />
-          </a>
         </div>
       </header>
 
