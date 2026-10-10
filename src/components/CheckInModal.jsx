@@ -5,15 +5,16 @@ import { formatMinutesToHours } from '../utils/calculator';
 export default function CheckInModal({
   employee,
   workType,
+  todaySchedule,
   weeklyStats,
   monthlyStats,
   onClose,
   onConfirmCheckIn,
   onOpenHistory,
 }) {
-  // 오늘 계획된 시간 (기본값)
-  const defaultStartTime = employee.scheduledStartTime || "13:00";
-  const defaultEndTime = employee.scheduledEndTime || "18:00";
+  // 오늘 계획된 시간 (월별 스케줄 우선 적용, 미등록 시 직원 기본값)
+  const defaultStartTime = todaySchedule?.startTime || employee.scheduledStartTime || "13:00";
+  const defaultEndTime = todaySchedule?.endTime || employee.scheduledEndTime || "18:00";
 
   const [isCustomMode, setIsCustomMode] = useState(false);
   const [customTime, setCustomTime] = useState(defaultStartTime);

@@ -22,6 +22,7 @@ export default function KioskView({
   workTypes,
   attendanceRecords,
   activeShifts,
+  schedules = [],
   onCheckIn,
   onCheckOut,
   onOpenAdmin,
@@ -292,6 +293,12 @@ export default function KioskView({
         <CheckInModal
           employee={selectedEmp}
           workType={workTypes.find((w) => w.id === selectedEmp.workTypeId)}
+          todaySchedule={schedules.find(
+            (s) =>
+              s.date === new Date().toISOString().split('T')[0] &&
+              s.empId === selectedEmp.id &&
+              !s.isOff
+          )}
           {...getEmpStats(selectedEmp.id, selectedEmp.workTypeId)}
           onClose={() => {
             setModalStep(null);

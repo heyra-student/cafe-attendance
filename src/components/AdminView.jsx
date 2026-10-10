@@ -4,6 +4,7 @@ import {
   Users,
   Clock,
   Calendar,
+  CalendarDays,
   DollarSign,
   AlertTriangle,
   FileSpreadsheet,
@@ -18,7 +19,13 @@ import {
   Download,
   AlertCircle,
   ShieldAlert,
+  ChevronLeft,
   ChevronRight,
+  X,
+  Sparkles,
+  Bot,
+  Copy,
+  Check,
 } from 'lucide-react';
 import * as XLSX from 'xlsx';
 import { LABOR_LAWS } from '../constants/initialData';
@@ -30,7 +37,7 @@ import {
   truncateTenWon,
   calculateDailyRecord,
 } from '../utils/calculator';
-import { syncRecordToGoogleSheets } from '../utils/storage';
+import { syncRecordToGoogleSheets, batchGenerateMonthlySchedules } from '../utils/storage';
 
 export default function AdminView({
   settings,
@@ -42,10 +49,12 @@ export default function AdminView({
   attendanceRecords,
   onSaveAttendanceRecords,
   activeShifts,
+  schedules = [],
+  onSaveSchedules,
   onBackToKiosk,
   onTestGoogleSync,
 }) {
-  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'attendance' | 'payroll' | 'employees' | 'settings' | 'laws'
+  const [activeTab, setActiveTab] = useState('dashboard'); // 'dashboard' | 'attendance' | 'schedules' | 'payroll' | 'employees' | 'settings' | 'laws'
   const [selectedLawModal, setSelectedLawModal] = useState(null);
 
   // 수정용 모달 상태
@@ -57,6 +66,15 @@ export default function AdminView({
 
   // 직원 편집 모달
   const [editingEmp, setEditingEmp] = useState(null);
+
+  // 월별 스케줄 관리 상태
+  const [schedYear, setSchedYear] = useState(new Date().getFullYear());
+  const [schedMonth, setSchedMonth] = useState(new Date().getMonth() + 1);
+  const [schedEmpFilter, setSchedEmpFilter] = useState('all');
+  const [editingShiftModal, setEditingShiftModal] = useState(null);
+  const [autoSchedulerModalOpen, setAutoSchedulerModalOpen] = useState(false);
+  const [schedulerJsonInput, setSchedulerJsonInput] = useState('');
+  const [copySuccess, setCopySuccess] = useState(false);
 
   // 급여 정산 월 선택
   const [settleMonth, setSettleMonth] = useState('2026-10');
@@ -353,6 +371,136 @@ export default function AdminView({
     onSaveAttendanceRecords(updated);
   };
 
+  // -------------------------------------------------------------------------
+  // 월별 스케줄(근무 계획) 관리 헬퍼 함수
+  // -------------------------------------------------------------------------
+  const handlePrevMonth = () => {
+    if (schedMonth === 1) {
+      setSchedYear((prev) => prev - 1);
+      setSchedMonth(12);
+    } else {
+      setSchedMonth((prev) => prev - 1);
+    }
+  };
+
+  const handleNextMonth = () => {
+    if (schedMonth === 12) {
+      setSchedYear((prev) => prev + 1);
+      setSchedMonth(1);
+    } else {
+      setSchedMonth((prev) => prev + 1);
+    }
+  };
+
+  const handleThisMonth = () => {
+    const now = new Date();
+    setSchedYear(now.getFullYear());
+    setSchedMonth(now.getMonth() + 1);
+  };
+
+  const getShiftDurationHours = (start, end) => {
+    if (!start || !end) return 0;
+    const [sh, sm] = start.split(':').map(Number);
+    const [eh, em] = end.split(':').map(Number);
+    const diff = (eh * 60 + em) - (sh * 60 + sm);
+    return Math.max(0, Number((diff / 60).toFixed(1)));
+  };
+
+  const activeEmployees = employees.filter((e) => e.isActive !== false);
+  const currentMonthPrefix = `${schedYear}-${String(schedMonth).padStart(2, '0')}`;
+  const currentMonthSchedules = (schedules || []).filter((s) => s.date.startsWith(currentMonthPrefix));
+
+  const getEmpMonthlyScheduledHours = (empId) => {
+    return currentMonthSchedules
+      .filter((s) => s.empId === empId && !s.isOff)
+      .reduce((sum, s) => sum + getShiftDurationHours(s.startTime, s.endTime), 0);
+  };
+
+  // 기본 요일 기준 이번 달 일괄 스케줄 자동 채우기
+  const handleBatchFillMonth = () => {
+    if (
+      !confirm(
+        `${schedYear}년 ${schedMonth}월에 직원들의 기본 계약 요일(예: 월/수/금)을 기준으로 스케줄을 일괄 자동 등록하시겠습니까?\n(기존 해당 월 스케줄은 새로운 계획으로 갱신됩니다)`
+      )
+    ) {
+      return;
+    }
+
+    const otherSchedules = (schedules || []).filter((s) => !s.date.startsWith(currentMonthPrefix));
+    const generated = batchGenerateMonthlySchedules(employees, schedYear, schedMonth);
+    onSaveSchedules([...otherSchedules, ...generated]);
+    alert(`🎉 ${schedYear}년 ${schedMonth}월에 총 ${generated.length}건의 스케줄이 일괄 등록되었습니다!`);
+  };
+
+  // 스케줄 단건 저장/수정
+  const handleSaveShiftModal = (shiftData) => {
+    const existingIndex = (schedules || []).findIndex(
+      (s) => s.date === shiftData.date && s.empId === shiftData.empId
+    );
+    let updated;
+    if (existingIndex >= 0) {
+      updated = [...schedules];
+      updated[existingIndex] = {
+        ...updated[existingIndex],
+        ...shiftData,
+      };
+    } else {
+      updated = [
+        ...(schedules || []),
+        {
+          id: `SCH-${shiftData.date}-${shiftData.empId}`,
+          ...shiftData,
+        },
+      ];
+    }
+    onSaveSchedules(updated);
+    setEditingShiftModal(null);
+  };
+
+  // 스케줄 삭제
+  const handleDeleteShift = (date, empId) => {
+    if (!confirm('해당 일자의 스케줄을 삭제하시겠습니까?')) return;
+    const filtered = (schedules || []).filter(
+      (s) => !(s.date === date && s.empId === empId)
+    );
+    onSaveSchedules(filtered);
+    setEditingShiftModal(null);
+  };
+
+  // 자동스케줄러 연동 JSON 불러오기
+  const handleImportSchedulerJson = () => {
+    try {
+      const parsed = JSON.parse(schedulerJsonInput);
+      if (!Array.isArray(parsed)) {
+        alert('올바른 JSON 배열 형식이 아닙니다. 예: [{"date": "2026-10-12", "empId": "EMP-001", "startTime": "13:00", "endTime": "17:30"}]');
+        return;
+      }
+      const keyMap = new Map();
+      (schedules || []).forEach((s) => keyMap.set(`${s.date}_${s.empId}`, s));
+      parsed.forEach((item) => {
+        if (item.date && item.empId) {
+          keyMap.set(`${item.date}_${item.empId}`, {
+            id: item.id || `SCH-${item.date}-${item.empId}`,
+            date: item.date,
+            empId: item.empId,
+            empName: item.empName || employees.find((e) => e.id === item.empId)?.name || '파트너',
+            startTime: item.startTime || '09:00',
+            endTime: item.endTime || '18:00',
+            isOff: !!item.isOff,
+            note: item.note || '자동스케줄러 연동',
+          });
+        }
+      });
+      const merged = Array.from(keyMap.values());
+      onSaveSchedules(merged);
+      alert(`🎉 자동 스케줄러 데이터 ${parsed.length}건이 성공적으로 반영되었습니다!`);
+      setAutoSchedulerModalOpen(false);
+      setSchedulerJsonInput('');
+    } catch (err) {
+      alert(`JSON 파싱 오류: ${err.message}. 형식을 확인해주세요.`);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col text-slate-800">
       {/* 1. 상단 글로벌 네비게이션 */}
@@ -378,6 +526,7 @@ export default function AdminView({
             {[
               { id: 'dashboard', label: '대시보드 & 법적알림', icon: AlertTriangle },
               { id: 'attendance', label: '출퇴근 기록 관리', icon: Clock },
+              { id: 'schedules', label: '월별 근무 계획(스케줄)', icon: CalendarDays },
               { id: 'payroll', label: '월별 급여 정산', icon: DollarSign },
               { id: 'employees', label: '직원 & 근무형태', icon: Users },
               { id: 'settings', label: '시스템 설정 & 구글연동', icon: SettingsIcon },
@@ -612,6 +761,19 @@ export default function AdminView({
               </div>
             </div>
 
+            {/* 계획 불일치 노란색 행 강조 안내 배너 */}
+            <div className="p-3.5 rounded-2xl bg-amber-50/90 border border-amber-300 flex items-center justify-between text-xs text-amber-950 shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <span className="w-3 h-3 rounded-full bg-amber-400 border-2 border-amber-600 shrink-0 animate-pulse" />
+                <span>
+                  <strong>[노란색 행 안내]</strong> 월별 근무 계획과 실제 출퇴근 시각(또는 조기 출근/연장)에 차이가 있는 기록은 노란색으로 강조되어 표시됩니다.
+                </span>
+              </div>
+              <span className="px-2.5 py-1 rounded-full bg-amber-200/90 font-bold text-amber-950 text-[11px] shrink-0 border border-amber-400">
+                ⚠️ 계획 불일치 행 노란색 하이라이트
+              </span>
+            </div>
+
             <div className="overflow-x-auto rounded-2xl border border-slate-200">
               <table className="w-full text-xs text-left">
                 <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200">
@@ -691,50 +853,114 @@ export default function AdminView({
                               </td>
                             </tr>
 
-                            {/* 당일 직원별 출퇴근 기록 행 */}
-                            {dayRecords.map((r) => (
-                              <tr key={r.id} className="hover:bg-slate-50/80 bg-white">
-                                <td className="py-3 px-4 font-semibold text-slate-500">
-                                  {r.date}
-                                </td>
-                                <td className="py-3 px-3 font-bold text-slate-900">
-                                  {r.empName}
-                                </td>
-                                <td className="py-3 px-3 text-slate-500">{r.workType}</td>
-                                <td className="py-3 px-3 font-semibold text-slate-800">
-                                  {r.checkInTime}
-                                </td>
-                                <td className="py-3 px-3 font-semibold text-slate-800">
-                                  {r.checkOutTime}
-                                </td>
-                                <td className="py-3 px-3 text-slate-500">
-                                  {r.breakMinutes || 0}분
-                                </td>
-                                <td className="py-3 px-3 font-bold text-emerald-700">
-                                  {r.actualWorkHours}h
-                                </td>
-                                <td className="py-3 px-3 text-slate-600">
-                                  {(r.hourlyWage || 0).toLocaleString()}원
-                                </td>
-                                <td className="py-3 px-3 font-bold text-slate-900">
-                                  {(r.dailyPay || 0).toLocaleString()}원
-                                </td>
-                                <td className="py-3 px-4 text-slate-500 max-w-xs truncate">
-                                  {r.note || '-'}
-                                </td>
-                                <td className="py-3 px-3 text-center">
-                                  <button
-                                    onClick={() => {
-                                      setEditingRecord({ ...r });
-                                      setEditReason('');
-                                    }}
-                                    className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold shadow-xs"
-                                  >
-                                    수정
-                                  </button>
-                                </td>
-                              </tr>
-                            ))}
+                            {/* 당일 직원별 출퇴근 기록 행 (계획과 상이 시 노란색 하이라이트) */}
+                            {dayRecords.map((r) => {
+                              // 등록된 월별 스케줄 계획 확인
+                              const plan = (schedules || []).find(
+                                (s) => s.date === r.date && s.empId === r.empId && !s.isOff
+                              );
+                              const emp = employees.find((e) => e.id === r.empId);
+                              const plannedStart = plan?.startTime || r.plannedStartTime || emp?.scheduledStartTime;
+                              const plannedEnd = plan?.endTime || r.plannedEndTime || emp?.scheduledEndTime;
+
+                              const isCheckInDiff = plannedStart && r.checkInTime && r.checkInTime !== plannedStart;
+                              const isCheckOutDiff = plannedEnd && r.checkOutTime && r.checkOutTime !== plannedEnd;
+                              const isDivergent =
+                                r.isDivergent ||
+                                r.isCustom ||
+                                isCheckInDiff ||
+                                isCheckOutDiff ||
+                                (r.note && (r.note.includes('조기 출근') || r.note.includes('계획과 상이')));
+
+                              return (
+                                <tr
+                                  key={r.id}
+                                  className={`transition-colors ${
+                                    isDivergent
+                                      ? 'bg-amber-100 hover:bg-amber-200/80 border-l-4 border-l-amber-500 font-medium'
+                                      : 'hover:bg-slate-50/80 bg-white'
+                                  }`}
+                                >
+                                  <td className="py-3 px-4 font-semibold text-slate-500">
+                                    {r.date}
+                                  </td>
+                                  <td className="py-3 px-3">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="font-bold text-slate-900">{r.empName}</span>
+                                      {isDivergent && (
+                                        <span
+                                          className="px-1.5 py-0.5 rounded text-[10px] font-black bg-amber-300 text-amber-950 border border-amber-400 shrink-0"
+                                          title={`계획 시각(${plannedStart || '-'}~${plannedEnd || '-'})과 실제 출퇴근 시각이 다릅니다.`}
+                                        >
+                                          ⚠️ 계획상이
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+                                  <td className="py-3 px-3 text-slate-500">{r.workType}</td>
+                                  <td className="py-3 px-3">
+                                    <span
+                                      className={
+                                        isCheckInDiff
+                                          ? 'px-1.5 py-0.5 rounded bg-amber-200 text-amber-950 font-bold border border-amber-400'
+                                          : 'font-semibold text-slate-800'
+                                      }
+                                      title={isCheckInDiff ? `계획 출근시각: ${plannedStart}` : undefined}
+                                    >
+                                      {r.checkInTime}
+                                    </span>
+                                    {isCheckInDiff && (
+                                      <span className="block text-[10px] text-amber-800 font-semibold">
+                                        (계획 {plannedStart})
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-3 px-3">
+                                    <span
+                                      className={
+                                        isCheckOutDiff
+                                          ? 'px-1.5 py-0.5 rounded bg-amber-200 text-amber-950 font-bold border border-amber-400'
+                                          : 'font-semibold text-slate-800'
+                                      }
+                                      title={isCheckOutDiff ? `계획 퇴근시각: ${plannedEnd}` : undefined}
+                                    >
+                                      {r.checkOutTime}
+                                    </span>
+                                    {isCheckOutDiff && (
+                                      <span className="block text-[10px] text-amber-800 font-semibold">
+                                        (계획 {plannedEnd})
+                                      </span>
+                                    )}
+                                  </td>
+                                  <td className="py-3 px-3 text-slate-500">
+                                    {r.breakMinutes || 0}분
+                                  </td>
+                                  <td className="py-3 px-3 font-bold text-emerald-700">
+                                    {r.actualWorkHours}h
+                                  </td>
+                                  <td className="py-3 px-3 text-slate-600">
+                                    {(r.hourlyWage || 0).toLocaleString()}원
+                                  </td>
+                                  <td className="py-3 px-3 font-bold text-slate-900">
+                                    {(r.dailyPay || 0).toLocaleString()}원
+                                  </td>
+                                  <td className="py-3 px-4 text-slate-600 max-w-xs">
+                                    <div className="truncate" title={r.note || ''}>{r.note || '-'}</div>
+                                  </td>
+                                  <td className="py-3 px-3 text-center">
+                                    <button
+                                      onClick={() => {
+                                        setEditingRecord({ ...r });
+                                        setEditReason('');
+                                      }}
+                                      className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold shadow-xs"
+                                    >
+                                      수정
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
                           </React.Fragment>
                         );
                       });
@@ -742,6 +968,285 @@ export default function AdminView({
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {/* ================= TAB: 월별 근무 계획 (스케줄 관리) ================= */}
+        {activeTab === 'schedules' && (
+          <div className="space-y-6">
+            {/* 상단 컨트롤 바 */}
+            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="p-2 rounded-xl bg-amber-100 text-amber-800">
+                      <CalendarDays className="w-5 h-5" />
+                    </span>
+                    <h2 className="text-lg font-bold text-slate-900">
+                      월별 파트너 근무 계획 (스케줄 관리)
+                    </h2>
+                  </div>
+                  <p className="text-xs text-slate-500">
+                    월별 출퇴근 계획을 수동으로 등록하거나 기본 요일로 일괄 자동 생성할 수 있습니다. (계획과 실제 출퇴근 시각이 다르면 출퇴근 관리에 노란색으로 강조됩니다)
+                  </p>
+                </div>
+
+                {/* 월 선택 및 액션 버튼들 */}
+                <div className="flex flex-wrap items-center gap-2.5">
+                  <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200">
+                    <button
+                      onClick={handlePrevMonth}
+                      className="p-1.5 rounded-xl hover:bg-white text-slate-600 transition"
+                      title="이전 달"
+                    >
+                      <ChevronLeft className="w-4 h-4" />
+                    </button>
+                    <span className="px-3 text-sm font-bold text-slate-900">
+                      {schedYear}년 {schedMonth}월
+                    </span>
+                    <button
+                      onClick={handleNextMonth}
+                      className="p-1.5 rounded-xl hover:bg-white text-slate-600 transition"
+                      title="다음 달"
+                    >
+                      <ChevronRight className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={handleThisMonth}
+                    className="px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition"
+                  >
+                    이번 달
+                  </button>
+
+                  <button
+                    onClick={handleBatchFillMonth}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-slate-950 font-bold text-xs shadow-sm transition"
+                    title="직원 계약에 등록된 근무 요일로 이 달 전체 스케줄을 한 번에 채웁니다"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    기본 요일로 이번 달 자동 채우기
+                  </button>
+
+                  <button
+                    onClick={() =>
+                      setEditingShiftModal({
+                        date: `${schedYear}-${String(schedMonth).padStart(2, '0')}-01`,
+                        empId: activeEmployees[0]?.id || '',
+                        startTime: '09:00',
+                        endTime: '17:30',
+                        isOff: false,
+                        note: '',
+                      })
+                    }
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs shadow-sm transition"
+                  >
+                    <Plus className="w-4 h-4" />
+                    스케줄 직접 등록
+                  </button>
+
+                  <button
+                    onClick={() => setAutoSchedulerModalOpen(true)}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs shadow-sm transition"
+                    title="자동 스케줄러 프로젝트 연동 및 JSON 데이터 불러오기"
+                  >
+                    <Bot className="w-4 h-4 text-purple-200" />
+                    자동스케줄러 연동
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* 파트너별 이번 달 계획 시간 대비 계약 기준 요약 카드 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+              {activeEmployees.map((emp) => {
+                const wt = workTypes.find((w) => w.id === emp.workTypeId);
+                const plannedTotal = getEmpMonthlyScheduledHours(emp.id);
+                const monthlyTarget = wt?.monthlyTargetHours || 60;
+                const isOver = plannedTotal > monthlyTarget;
+
+                return (
+                  <div
+                    key={emp.id}
+                    className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex justify-between items-start mb-1">
+                        <span className="font-bold text-slate-900 text-sm">{emp.name}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${wt?.badgeColor}`}>
+                          {wt?.name}
+                        </span>
+                      </div>
+                      <p className="text-[11px] text-slate-500">
+                        기본: {emp.scheduledStartTime}~{emp.scheduledEndTime} ({emp.scheduledDays})
+                      </p>
+                    </div>
+
+                    <div className="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
+                      <div>
+                        <span className="text-[11px] text-slate-400 block">이 달 계획 총 시간</span>
+                        <span className={`text-base font-black ${isOver ? 'text-rose-600' : 'text-slate-900'}`}>
+                          {plannedTotal.toFixed(1)}시간
+                        </span>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-[11px] text-slate-400 block">월 기준선</span>
+                        <span className="text-xs font-bold text-slate-700">{monthlyTarget}시간</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* 월간 스케줄 타임테이블 그리드 */}
+            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
+              <div className="flex justify-between items-center mb-4">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900">
+                    {schedYear}년 {schedMonth}월 일자별 파트너 스케줄 타임테이블
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    셀을 클릭하면 해당 일자의 계획 시각을 즉시 수정하거나 휴무(OFF)로 지정할 수 있습니다.
+                  </p>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-slate-500">
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 rounded bg-amber-100 border border-amber-300" />
+                    계획 근무
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 rounded bg-slate-100 border border-slate-300" />
+                    휴무 (OFF)
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-3 h-3 rounded bg-white border border-dashed border-slate-300" />
+                    미배정
+                  </span>
+                </div>
+              </div>
+
+              {/* 가로 스크롤 테이블 */}
+              <div className="overflow-x-auto rounded-2xl border border-slate-200">
+                <table className="w-full text-xs text-left border-collapse min-w-[1200px]">
+                  <thead className="bg-slate-50 text-slate-700 font-bold border-b border-slate-200">
+                    <tr>
+                      <th className="py-3 px-4 sticky left-0 z-20 bg-slate-50 min-w-[130px] border-r border-slate-200">
+                        파트너명
+                      </th>
+                      <th className="py-3 px-3 min-w-[90px] border-r border-slate-200 text-center">
+                        이달 총계
+                      </th>
+                      {Array.from(
+                        { length: new Date(schedYear, schedMonth, 0).getDate() },
+                        (_, i) => i + 1
+                      ).map((day) => {
+                        const dateObj = new Date(schedYear, schedMonth - 1, day);
+                        const dayNames = ['일', '월', '화', '수', '목', '금', '토'];
+                        const dayOfWeek = dayNames[dateObj.getDay()];
+                        const isSunday = dateObj.getDay() === 0;
+                        const isSaturday = dateObj.getDay() === 6;
+
+                        return (
+                          <th
+                            key={day}
+                            className={`py-2 px-1 text-center min-w-[76px] border-r border-slate-200 ${
+                              isSunday
+                                ? 'bg-rose-50/70 text-rose-700'
+                                : isSaturday
+                                ? 'bg-blue-50/70 text-blue-700'
+                                : 'bg-slate-50 text-slate-700'
+                            }`}
+                          >
+                            <span className="block text-xs font-black">{day}일</span>
+                            <span className="block text-[10px] font-medium">({dayOfWeek})</span>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {activeEmployees.map((emp) => {
+                      const wt = workTypes.find((w) => w.id === emp.workTypeId);
+                      const totalH = getEmpMonthlyScheduledHours(emp.id);
+                      const daysInMonth = new Date(schedYear, schedMonth, 0).getDate();
+
+                      return (
+                        <tr key={emp.id} className="hover:bg-slate-50/60">
+                          {/* 고정 파트너 컬럼 */}
+                          <td className="py-3 px-4 sticky left-0 z-10 bg-white font-bold text-slate-900 border-r border-slate-200 shadow-xs">
+                            <div className="flex items-center gap-1.5">
+                              <span>{emp.name}</span>
+                              <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold border ${wt?.badgeColor}`}>
+                                {wt?.name.split(' ')[0]}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="py-3 px-2 text-center font-bold text-slate-800 border-r border-slate-200 bg-slate-50/50">
+                            {totalH.toFixed(1)}h
+                          </td>
+
+                          {/* 1일 ~ 말일 셀 */}
+                          {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
+                            const dayStr = String(day).padStart(2, '0');
+                            const monthStr = String(schedMonth).padStart(2, '0');
+                            const dateStr = `${schedYear}-${monthStr}-${dayStr}`;
+                            const shift = (schedules || []).find(
+                              (s) => s.date === dateStr && s.empId === emp.id
+                            );
+
+                            const duration =
+                              shift && !shift.isOff
+                                ? getShiftDurationHours(shift.startTime, shift.endTime)
+                                : 0;
+
+                            return (
+                              <td
+                                key={day}
+                                onClick={() =>
+                                  setEditingShiftModal({
+                                    date: dateStr,
+                                    empId: emp.id,
+                                    empName: emp.name,
+                                    startTime: shift?.startTime || emp.scheduledStartTime || '09:00',
+                                    endTime: shift?.endTime || emp.scheduledEndTime || '18:00',
+                                    isOff: shift ? !!shift.isOff : false,
+                                    note: shift?.note || '',
+                                  })
+                                }
+                                className="p-1 border-r border-slate-100 text-center align-middle cursor-pointer hover:bg-amber-50/40 transition"
+                              >
+                                {shift ? (
+                                  shift.isOff ? (
+                                    <div className="py-1 px-1 rounded-lg bg-slate-100 text-slate-400 font-bold text-[10px] hover:bg-slate-200 transition">
+                                      휴무
+                                    </div>
+                                  ) : (
+                                    <div className="py-1 px-1 rounded-lg bg-amber-50 hover:bg-amber-100 border border-amber-200 text-amber-950 font-bold text-[10px] shadow-2xs transition">
+                                      <div>{shift.startTime}</div>
+                                      <div className="text-slate-400 font-normal">~</div>
+                                      <div>{shift.endTime}</div>
+                                      <div className="text-[9px] text-amber-700 font-extrabold mt-0.5">
+                                        ({duration}h)
+                                      </div>
+                                    </div>
+                                  )
+                                ) : (
+                                  <div className="h-10 rounded-lg border border-dashed border-slate-200 hover:border-amber-400 flex items-center justify-center text-slate-300 hover:text-amber-600 transition text-[11px]">
+                                    +
+                                  </div>
+                                )}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -1679,6 +2184,259 @@ export default function AdminView({
                 className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm"
               >
                 저장 완료
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------- */}
+      {/* 개별 근무 계획 (스케줄) 등록/수정 모달 */}
+      {/* --------------------------------------------------------------- */}
+      {editingShiftModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full p-6 border border-slate-100 animate-in fade-in zoom-in duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-amber-100 text-amber-800">
+                  <CalendarDays className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">근무 계획(스케줄) 등록/수정</h3>
+                  <p className="text-xs text-slate-500">파트너의 출퇴근 예정 시각을 지정합니다.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setEditingShiftModal(null)}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-4 mb-6">
+              {/* 날짜 선택 */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">근무 일자</label>
+                <input
+                  type="date"
+                  value={editingShiftModal.date}
+                  onChange={(e) =>
+                    setEditingShiftModal({ ...editingShiftModal, date: e.target.value })
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-900"
+                />
+              </div>
+
+              {/* 직원 선택 */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">대상 파트너</label>
+                <select
+                  value={editingShiftModal.empId}
+                  onChange={(e) => {
+                    const sel = employees.find((emp) => emp.id === e.target.value);
+                    setEditingShiftModal({
+                      ...editingShiftModal,
+                      empId: e.target.value,
+                      empName: sel?.name || '',
+                      startTime: sel?.scheduledStartTime || '09:00',
+                      endTime: sel?.scheduledEndTime || '18:00',
+                    });
+                  }}
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-bold text-slate-900 bg-white"
+                >
+                  {activeEmployees.map((emp) => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name} ({workTypes.find((w) => w.id === emp.workTypeId)?.name})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* 휴무 여부 토글 */}
+              <div className="bg-slate-50 p-3 rounded-2xl border border-slate-200 flex items-center justify-between">
+                <div>
+                  <span className="font-bold text-slate-800 block text-xs">휴무(OFF)로 지정</span>
+                  <span className="text-[11px] text-slate-500">이 날은 근무가 없는 쉬는 날입니다.</span>
+                </div>
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editingShiftModal.isOff}
+                    onChange={(e) =>
+                      setEditingShiftModal({ ...editingShiftModal, isOff: e.target.checked })
+                    }
+                    className="sr-only peer"
+                  />
+                  <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-slate-700"></div>
+                </label>
+              </div>
+
+              {/* 출퇴근 시각 입력 (휴무가 아닐 때만) */}
+              {!editingShiftModal.isOff && (
+                <div className="grid grid-cols-2 gap-3 bg-amber-50/60 p-3.5 rounded-2xl border border-amber-200">
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">계획 출근시각</label>
+                    <input
+                      type="time"
+                      value={editingShiftModal.startTime}
+                      onChange={(e) =>
+                        setEditingShiftModal({ ...editingShiftModal, startTime: e.target.value })
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold bg-white text-slate-900"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-bold text-slate-700 block mb-1">계획 퇴근시각</label>
+                    <input
+                      type="time"
+                      value={editingShiftModal.endTime}
+                      onChange={(e) =>
+                        setEditingShiftModal({ ...editingShiftModal, endTime: e.target.value })
+                      }
+                      className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-bold bg-white text-slate-900"
+                    />
+                  </div>
+                  <div className="col-span-2 text-[11px] text-amber-900 font-semibold flex items-center justify-between">
+                    <span>예상 근무시간:</span>
+                    <strong className="text-sm text-amber-950 font-black">
+                      {getShiftDurationHours(editingShiftModal.startTime, editingShiftModal.endTime)}시간
+                    </strong>
+                  </div>
+                </div>
+              )}
+
+              {/* 비고 */}
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1">메모 / 스케줄 비고 (선택)</label>
+                <input
+                  type="text"
+                  placeholder="예: 오픈 지원, 파트너 요청 대타 등"
+                  value={editingShiftModal.note || ''}
+                  onChange={(e) =>
+                    setEditingShiftModal({ ...editingShiftModal, note: e.target.value })
+                  }
+                  className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 text-xs font-medium text-slate-900"
+                />
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between pt-2 border-t border-slate-100">
+              <button
+                onClick={() =>
+                  handleDeleteShift(editingShiftModal.date, editingShiftModal.empId)
+                }
+                className="text-xs font-bold text-rose-600 hover:text-rose-700 hover:underline flex items-center gap-1"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                이 스케줄 삭제
+              </button>
+
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setEditingShiftModal(null)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold text-slate-600 hover:bg-slate-100"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={() => handleSaveShiftModal(editingShiftModal)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold bg-amber-600 hover:bg-amber-700 text-white shadow-sm"
+                >
+                  스케줄 저장
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* --------------------------------------------------------------- */}
+      {/* 자동 스케줄러 연동 및 JSON Import/Export 모달 */}
+      {/* --------------------------------------------------------------- */}
+      {autoSchedulerModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl shadow-2xl max-w-xl w-full p-6 border border-slate-100 max-h-[90vh] overflow-y-auto animate-in fade-in zoom-in duration-200">
+            <div className="flex justify-between items-center mb-4">
+              <div className="flex items-center gap-2">
+                <span className="p-2 rounded-xl bg-purple-100 text-purple-800">
+                  <Bot className="w-5 h-5" />
+                </span>
+                <div>
+                  <h3 className="text-base font-bold text-slate-900">🤖 자동스케줄러 프로젝트 연동 가이드</h3>
+                  <p className="text-xs text-slate-500">외부 자동 스케줄 생성 엔진과 원활하게 조인할 수 있습니다.</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setAutoSchedulerModalOpen(false)}
+                className="p-1 rounded-full text-slate-400 hover:text-slate-600 hover:bg-slate-100"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="space-y-5 text-xs text-slate-700">
+              {/* 설명 안내 */}
+              <div className="p-3.5 rounded-2xl bg-purple-50 border border-purple-200 leading-relaxed text-purple-950">
+                <p className="font-bold mb-1">🔗 자동스케줄러 조인(Join) 아키텍처 준비 완료</p>
+                <p>
+                  향후 사장님께서 AI/알고리즘 기반 스케줄 자동 작성 프로젝트를 연결하실 때, 아래의 <strong>표준 JSON 포맷</strong>으로 데이터를 밀어넣어 주시면 본 출퇴근 시스템과 1초 만에 완벽히 동기화됩니다.
+                </p>
+              </div>
+
+              {/* 1. 스케줄 JSON 직접 붙여넣기 (Import) */}
+              <div className="space-y-2">
+                <label className="font-bold text-slate-900 block">
+                  1. 외부 자동스케줄러 결과 JSON 붙여넣기 (가져오기)
+                </label>
+                <textarea
+                  rows={4}
+                  placeholder={`[\n  { "date": "${schedYear}-${String(schedMonth).padStart(2, '0')}-05", "empId": "EMP-001", "startTime": "13:00", "endTime": "17:30" },\n  { "date": "${schedYear}-${String(schedMonth).padStart(2, '0')}-05", "empId": "EMP-002", "startTime": "09:00", "endTime": "14:30" }\n]`}
+                  value={schedulerJsonInput}
+                  onChange={(e) => setSchedulerJsonInput(e.target.value)}
+                  className="w-full p-3 font-mono text-[11px] rounded-xl border border-slate-300 focus:ring-2 focus:ring-purple-500"
+                />
+                <button
+                  onClick={handleImportSchedulerJson}
+                  disabled={!schedulerJsonInput.trim()}
+                  className="px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-bold text-xs shadow-sm transition"
+                >
+                  붙여넣은 스케줄 일괄 적용하기
+                </button>
+              </div>
+
+              {/* 2. 현재 월 스케줄 JSON 내보내기 (Export) */}
+              <div className="space-y-2 pt-3 border-t border-slate-200">
+                <div className="flex justify-between items-center">
+                  <label className="font-bold text-slate-900">
+                    2. 현재 {schedYear}년 {schedMonth}월 등록된 스케줄 JSON 내보내기
+                  </label>
+                  <button
+                    onClick={() => {
+                      const jsonStr = JSON.stringify(currentMonthSchedules, null, 2);
+                      navigator.clipboard.writeText(jsonStr);
+                      setCopySuccess(true);
+                      setTimeout(() => setCopySuccess(false), 2000);
+                    }}
+                    className="flex items-center gap-1 text-[11px] font-bold text-purple-700 hover:underline"
+                  >
+                    {copySuccess ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
+                    {copySuccess ? '복사되었습니다!' : 'JSON 전체 복사'}
+                  </button>
+                </div>
+                <pre className="p-3 bg-slate-900 text-emerald-400 rounded-xl font-mono text-[10px] overflow-x-auto max-h-32">
+                  {JSON.stringify(currentMonthSchedules.slice(0, 5), null, 2)}
+                  {currentMonthSchedules.length > 5 ? `\n... 외 ${currentMonthSchedules.length - 5}건` : ''}
+                </pre>
+              </div>
+            </div>
+
+            <div className="flex justify-end pt-4 mt-4 border-t border-slate-100">
+              <button
+                onClick={() => setAutoSchedulerModalOpen(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-700"
+              >
+                닫기
               </button>
             </div>
           </div>

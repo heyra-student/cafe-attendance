@@ -12,6 +12,8 @@ import {
   saveAttendanceRecords,
   loadActiveShifts,
   saveActiveShifts,
+  loadSchedules,
+  saveSchedules,
   syncRecordToGoogleSheets,
   flushOfflineQueue,
 } from './utils/storage';
@@ -26,11 +28,16 @@ export default function App() {
   const [employees, setEmployees] = useState(loadEmployees);
   const [attendanceRecords, setAttendanceRecords] = useState(loadAttendanceRecords);
   const [activeShifts, setActiveShifts] = useState(loadActiveShifts);
+  const [schedules, setSchedules] = useState(() => loadSchedules(employees));
 
   // 로컬스토리지 영구 동기화
   useEffect(() => {
     saveSettings(settings);
   }, [settings]);
+
+  useEffect(() => {
+    saveSchedules(schedules);
+  }, [schedules]);
 
   useEffect(() => {
     saveWorkTypes(workTypes);
@@ -57,14 +64,19 @@ export default function App() {
     return () => window.removeEventListener('online', handleOnline);
   }, [settings.googleScriptUrl]);
 
-  // 1. 출근 처리 로직 (PRD 4.1 조항 완벽 반영)
+  // 1. 출근 처리 로직 (PRD 4.1 조항 완벽 반영 + 월별 스케줄 연동)
   const handleCheckIn = (employee, { time, isCustom, plannedTime }) => {
     const todayStr = new Date().toISOString().split('T')[0];
+    const dayPlan = schedules.find(
+      (s) => s.date === todayStr && s.empId === employee.id && !s.isOff
+    );
+    const finalPlannedTime = plannedTime || dayPlan?.startTime || employee.scheduledStartTime;
+
     const newShift = {
       empId: employee.id,
       date: todayStr,
       checkInTime: time,
-      plannedTime,
+      plannedTime: finalPlannedTime,
       isCustom,
       startedAt: new Date().toISOString(),
     };
@@ -75,15 +87,15 @@ export default function App() {
     };
     setActiveShifts(nextShifts);
 
-    // 구글 시트 및 로컬 기록용 임시 객체
+    // 구글 시트 및 로컬 기록용 안내 메시지
     if (isCustom) {
-      alert(`[출근 완료] ${employee.name} 파트너님, 직접 입력하신 ${time}으로 출근 체크되었습니다. (사장님께 알림 전송)`);
+      alert(`[출근 완료] ${employee.name} 파트너님, 직접 입력하신 ${time}으로 출근 체크되었습니다. (사장님께 확인 요청 전달)`);
     } else {
-      alert(`[출근 완료] ${employee.name} 파트너님, 정규 스케줄 시각(${time})으로 출근 체크되었습니다. 오늘도 힘찬 하루 되세요!`);
+      alert(`[출근 완료] ${employee.name} 파트너님, 계획된 스케줄 시각(${time})으로 출근 체크되었습니다. 오늘도 힘찬 하루 되세요!`);
     }
   };
 
-  // 2. 퇴근 처리 로직 (PRD 4.2 & 4.5 조항 완벽 반영)
+  // 2. 퇴근 처리 로직 (PRD 4.2 & 4.5 조항 완벽 반영 + 계획 대비 상이 여부 자동 감지)
   const handleCheckOut = (employee, { checkOutTime, breakMinutes }) => {
     const shift = activeShifts[employee.id];
     if (!shift) return;
@@ -100,11 +112,23 @@ export default function App() {
       isUnderFive: settings.isUnderFiveEmployees,
     });
 
+    // 해당 날짜/직원의 등록된 월별 스케줄 확인
+    const dayPlan = schedules.find(
+      (s) => s.date === todayStr && s.empId === employee.id && !s.isOff
+    );
+    const plannedStart = dayPlan?.startTime || shift.plannedTime || employee.scheduledStartTime;
+    const plannedEnd = dayPlan?.endTime || employee.scheduledEndTime;
+
+    // 계획 시각과 실제 출퇴근 시각 비교
+    const isCheckInDiff = plannedStart && shift.checkInTime !== plannedStart;
+    const isCheckOutDiff = plannedEnd && checkOutTime !== plannedEnd;
+    const isDivergent = shift.isCustom || isCheckInDiff || isCheckOutDiff;
+
     // 비고 및 플래그 세팅
     let note = '정상 퇴근';
     let isApproved = true;
-    if (shift.isCustom) {
-      note = `[조기 출근 직접 입력 (계획: ${shift.plannedTime} → 입력: ${shift.checkInTime})]`;
+    if (isDivergent) {
+      note = `[계획과 상이 (계획: ${plannedStart || '-'}~${plannedEnd || '-'} → 실제: ${shift.checkInTime}~${checkOutTime})]`;
       isApproved = false; // 사장 확인 필요 플래그
     }
 
@@ -124,6 +148,10 @@ export default function App() {
       nightPay: calcResult.nightPay,
       workCategory: '정상출근', // 2단계 연차 대비 필드
       isApproved,
+      isCustom: shift.isCustom,
+      isDivergent,
+      plannedStartTime: plannedStart,
+      plannedEndTime: plannedEnd,
       note,
     };
 
@@ -183,6 +211,7 @@ export default function App() {
           workTypes={workTypes}
           attendanceRecords={attendanceRecords}
           activeShifts={activeShifts}
+          schedules={schedules}
           onCheckIn={handleCheckIn}
           onCheckOut={handleCheckOut}
           onOpenAdmin={() => setViewMode('admin')}
@@ -198,6 +227,8 @@ export default function App() {
           attendanceRecords={attendanceRecords}
           onSaveAttendanceRecords={setAttendanceRecords}
           activeShifts={activeShifts}
+          schedules={schedules}
+          onSaveSchedules={setSchedules}
           onBackToKiosk={() => setViewMode('kiosk')}
           onTestGoogleSync={handleTestGoogleSync}
         />
