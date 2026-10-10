@@ -372,38 +372,53 @@ export default function AdminView({
           </h1>
         </div>
 
-        {/* 탭 네비게이션 */}
-        <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl text-xs font-semibold">
-          {[
-            { id: 'dashboard', label: '대시보드 & 법적알림', icon: AlertTriangle },
-            { id: 'attendance', label: '출퇴근 기록 관리', icon: Clock },
-            { id: 'payroll', label: '월별 급여 정산', icon: DollarSign },
-            { id: 'employees', label: '직원 & 근무형태', icon: Users },
-            { id: 'settings', label: '시스템 설정 & 구글연동', icon: SettingsIcon },
-            { id: 'laws', label: '근로 법령 바로가기', icon: BookOpen },
-          ].map((tab) => {
-            const Icon = tab.icon;
-            const isActive = activeTab === tab.id;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition ${
-                  isActive
-                    ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                    : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{tab.label}</span>
-                {tab.id === 'dashboard' && alerts.length > 0 && (
-                  <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold">
-                    {alerts.length}
-                  </span>
-                )}
-              </button>
-            );
-          })}
+        {/* 탭 네비게이션 & 구글시트 바로가기 */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1 bg-slate-800 p-1 rounded-xl text-xs font-semibold">
+            {[
+              { id: 'dashboard', label: '대시보드 & 법적알림', icon: AlertTriangle },
+              { id: 'attendance', label: '출퇴근 기록 관리', icon: Clock },
+              { id: 'payroll', label: '월별 급여 정산', icon: DollarSign },
+              { id: 'employees', label: '직원 & 근무형태', icon: Users },
+              { id: 'settings', label: '시스템 설정 & 구글연동', icon: SettingsIcon },
+              { id: 'laws', label: '근로 법령 바로가기', icon: BookOpen },
+            ].map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg transition ${
+                    isActive
+                      ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                      : 'text-slate-300 hover:text-white hover:bg-slate-700/60'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{tab.label}</span>
+                  {tab.id === 'dashboard' && alerts.length > 0 && (
+                    <span className="w-4 h-4 rounded-full bg-rose-500 text-white text-[10px] flex items-center justify-center font-bold">
+                      {alerts.length}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* 구글 시트 원클릭 바로가기 버튼 */}
+          <a
+            href={settings.googleSheetDocUrl || "https://docs.google.com/spreadsheets/"}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 active:bg-emerald-700 text-white text-xs font-bold shadow-sm transition whitespace-nowrap"
+            title="구글 스프레드시트 새 창 열기"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-100" />
+            <span>구글시트 바로가기</span>
+            <ExternalLink className="w-3.5 h-3.5 text-emerald-200" />
+          </a>
         </div>
       </header>
 
@@ -589,9 +604,20 @@ export default function AdminView({
                   <Plus className="w-4 h-4 text-amber-400" />
                   누락된 기록 수동 등록
                 </button>
+                <a
+                  href={settings.googleSheetDocUrl || "https://docs.google.com/spreadsheets/"}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-300 text-xs font-bold shadow-sm transition"
+                  title="구글 스프레드시트 새 창 열기"
+                >
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <span>구글시트 실시간 기록 보기</span>
+                  <ExternalLink className="w-3.5 h-3.5 text-emerald-500" />
+                </a>
                 <button
                   onClick={handleDownloadExcel}
-                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow-sm"
+                  className="flex items-center gap-1.5 px-4 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-300 shadow-sm"
                 >
                   <Download className="w-4 h-4" />
                   엑셀 파일로 다운로드
@@ -1019,28 +1045,71 @@ export default function AdminView({
             </div>
 
             {/* 구글 스프레드시트 연동 설정 가이드 */}
-            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200">
-              <h2 className="text-base font-bold text-slate-900 mb-2">구글 스프레드시트 실시간 연동</h2>
-              <p className="text-xs text-slate-500 mb-4">
-                Google Apps Script 웹 앱 URL을 입력하면, 직원이 출퇴근 버튼을 누르는 즉시 구글 시트에 한 줄씩 저장됩니다.
-              </p>
+            <div className="bg-white rounded-3xl p-6 shadow-sm border border-slate-200 space-y-5">
+              <div>
+                <h2 className="text-base font-bold text-slate-900 mb-1">구글 스프레드시트 실시간 연동 및 바로가기</h2>
+                <p className="text-xs text-slate-500">
+                  구글 시트 웹 주소와 Apps Script 연동 URL을 등록하면, 사이트 어디서든 구글 시트를 원클릭으로 열고 실시간 자동 저장이 가능합니다.
+                </p>
+              </div>
 
-              <div className="flex gap-2 mb-4">
+              {/* 1. 구글 스프레드시트 바로가기 웹 링크 */}
+              <div className="p-4 rounded-2xl bg-emerald-50/60 border border-emerald-200">
+                <div className="flex justify-between items-center mb-1">
+                  <label className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
+                    <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                    1. 내 구글 스프레드시트 바로가기 웹 주소 (브라우저 주소창 링크)
+                  </label>
+                  {settings.googleSheetDocUrl && (
+                    <a
+                      href={settings.googleSheetDocUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs font-bold text-emerald-800 hover:text-emerald-950 underline flex items-center gap-1"
+                    >
+                      지금 시트 열어보기 ↗
+                    </a>
+                  )}
+                </div>
+                <p className="text-[11px] text-slate-500 mb-2">
+                  만드신 구글 시트의 인터넷 주소를 복사해 넣으시면, 상단 헤더의 <strong>[구글시트 바로가기]</strong> 버튼 클릭 시 내 시트가 새 창으로 바로 열립니다.
+                </p>
                 <input
                   type="url"
-                  placeholder="https://script.google.com/macros/s/XXXXX/exec"
-                  value={settings.googleScriptUrl || ''}
+                  placeholder="https://docs.google.com/spreadsheets/d/XXXXXXXXX/edit"
+                  value={settings.googleSheetDocUrl || ''}
                   onChange={(e) =>
-                    onSaveSettings({ ...settings, googleScriptUrl: e.target.value })
+                    onSaveSettings({ ...settings, googleSheetDocUrl: e.target.value })
                   }
-                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 text-xs font-medium text-slate-900"
+                  className="w-full px-4 py-2.5 rounded-xl border border-slate-300 text-xs font-medium text-slate-900 bg-white focus:ring-2 focus:ring-emerald-500"
                 />
-                <button
-                  onClick={onTestGoogleSync}
-                  className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold whitespace-nowrap"
-                >
-                  연결 테스트 전송
-                </button>
+              </div>
+
+              {/* 2. Apps Script 웹 앱 URL */}
+              <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                <label className="text-xs font-bold text-slate-800 block mb-1">
+                  2. Google Apps Script 자동 동기화 웹 앱 URL (필수)
+                </label>
+                <p className="text-[11px] text-slate-500 mb-2">
+                  직원이 출퇴근 버튼을 누르는 순간 구글 시트에 한 줄씩 실시간 자동 저장하기 위한 주소입니다.
+                </p>
+                <div className="flex gap-2">
+                  <input
+                    type="url"
+                    placeholder="https://script.google.com/macros/s/XXXXX/exec"
+                    value={settings.googleScriptUrl || ''}
+                    onChange={(e) =>
+                      onSaveSettings({ ...settings, googleScriptUrl: e.target.value })
+                    }
+                    className="flex-1 px-4 py-2.5 rounded-xl border border-slate-300 text-xs font-medium text-slate-900 bg-white"
+                  />
+                  <button
+                    onClick={onTestGoogleSync}
+                    className="px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold whitespace-nowrap shadow-sm"
+                  >
+                    연결 테스트 전송
+                  </button>
+                </div>
               </div>
 
               {/* 쉬운 안내서 */}

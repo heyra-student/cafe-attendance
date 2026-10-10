@@ -6,6 +6,7 @@ export const INITIAL_SETTINGS = {
   allowAnnualLeave: false, // 연차 자율 부여 여부
   weekStartDay: "mon", // 한 주의 시작 요일
   googleScriptUrl: "",
+  googleSheetDocUrl: "", // 구글 스프레드시트 바로가기 웹 링크
 };
 
 export const INITIAL_WORK_TYPES = [
