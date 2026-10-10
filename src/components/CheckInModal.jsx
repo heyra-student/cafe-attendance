@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Clock, AlertTriangle, ArrowRight, CheckCircle2, Edit3 } from 'lucide-react';
+import { X, Clock, AlertTriangle, ArrowRight, CheckCircle2, Edit3, Calendar } from 'lucide-react';
 import { formatMinutesToHours } from '../utils/calculator';
 
 export default function CheckInModal({
@@ -9,6 +9,7 @@ export default function CheckInModal({
   monthlyStats,
   onClose,
   onConfirmCheckIn,
+  onOpenHistory,
 }) {
   // 오늘 계획된 시간 (기본값)
   const defaultStartTime = employee.scheduledStartTime || "13:00";
@@ -98,6 +99,19 @@ export default function CheckInModal({
               {formatMinutesToHours(monthlyStats.remainingMinutes)} 남음
             </span>
           </div>
+
+          {onOpenHistory && (
+            <div className="pt-2.5 mt-2 border-t border-slate-200/80 flex justify-end">
+              <button
+                type="button"
+                onClick={onOpenHistory}
+                className="text-xs font-bold text-amber-800 hover:text-amber-900 flex items-center gap-1 hover:underline py-0.5"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                나의 이번 달 일별 근무시간·누적시간 확인 &gt;
+              </button>
+            </div>
+          )}
         </div>
 
         {/* 기준 초과 경고 배너 */}

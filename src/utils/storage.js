@@ -73,7 +73,16 @@ export function saveSettings(settings) {
 
 export function loadWorkTypes() {
   const data = localStorage.getItem(STORAGE_KEYS.WORK_TYPES);
-  return data ? JSON.parse(data) : INITIAL_WORK_TYPES;
+  if (!data) return INITIAL_WORK_TYPES;
+  const list = JSON.parse(data);
+  // 이전 구명칭이 있으면 주 시간 명칭으로 마이그레이션
+  return list.map((wt) => {
+    if (wt.id === 'WT-01' && wt.name.includes('초단시간')) return { ...wt, name: '주 15시간 미만' };
+    if (wt.id === 'WT-02' && wt.name.includes('파트타이머')) return { ...wt, name: '주 25시간' };
+    if (wt.id === 'WT-03' && wt.name.includes('풀타임')) return { ...wt, name: '주 40시간' };
+    if (wt.id === 'WT-04' && wt.name.includes('주말 전용')) return { ...wt, name: '주 16시간 (주말)' };
+    return wt;
+  });
 }
 
 export function saveWorkTypes(workTypes) {

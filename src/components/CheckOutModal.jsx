@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Coffee, CheckCircle2, AlertCircle, Plus, Minus } from 'lucide-react';
+import { X, Coffee, CheckCircle2, AlertCircle, Plus, Minus, Calendar } from 'lucide-react';
 import {
   timeToMinutes,
   minutesToTime,
@@ -12,6 +12,7 @@ export default function CheckOutModal({
   shift,
   onClose,
   onConfirmCheckOut,
+  onOpenHistory,
 }) {
   const currentTimeStr = minutesToTime(
     new Date().getHours() * 60 + new Date().getMinutes()
@@ -122,12 +123,25 @@ export default function CheckOutModal({
         </div>
 
         {/* 오늘 인정될 실근무시간 요약 */}
-        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 mb-5 flex justify-between items-center">
+        <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 mb-3 flex justify-between items-center">
           <span className="text-xs font-bold text-emerald-900">오늘 인정될 실근무시간</span>
           <span className="text-lg font-black text-emerald-800">
             {formatMinutesToHours(actualWorkMinutes)}
           </span>
         </div>
+
+        {onOpenHistory && (
+          <div className="mb-4 flex justify-end">
+            <button
+              type="button"
+              onClick={onOpenHistory}
+              className="text-xs font-bold text-amber-800 hover:text-amber-900 flex items-center gap-1 hover:underline py-0.5"
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              나의 이번 달 일별 근무시간·누적시간 확인 &gt;
+            </button>
+          </div>
+        )}
 
         {/* 퇴근 확정 버튼 */}
         <button

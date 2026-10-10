@@ -13,6 +13,7 @@ import {
 import PinModal from './PinModal';
 import CheckInModal from './CheckInModal';
 import CheckOutModal from './CheckOutModal';
+import PartnerWorkHistoryModal from './PartnerWorkHistoryModal';
 import { formatMinutesToHours, timeToMinutes } from '../utils/calculator';
 
 export default function KioskView({
@@ -31,6 +32,7 @@ export default function KioskView({
   // 모달 상태
   const [selectedEmp, setSelectedEmp] = useState(null);
   const [modalStep, setModalStep] = useState(null); // 'pin' | 'checkin' | 'checkout'
+  const [historyModalEmp, setHistoryModalEmp] = useState(null); // 파트너 일별 근무내역 모달
   const [adminPinModal, setAdminPinModal] = useState(false);
 
   // 1초마다 시계 갱신 및 온라인 상태 감지
@@ -296,6 +298,7 @@ export default function KioskView({
             setSelectedEmp(null);
           }}
           onConfirmCheckIn={handleConfirmCheckIn}
+          onOpenHistory={() => setHistoryModalEmp(selectedEmp)}
         />
       )}
 
@@ -309,6 +312,17 @@ export default function KioskView({
             setSelectedEmp(null);
           }}
           onConfirmCheckOut={handleConfirmCheckOut}
+          onOpenHistory={() => setHistoryModalEmp(selectedEmp)}
+        />
+      )}
+
+      {/* 파트너 전용 이번 달 일별 근무시간 및 누적시간 조회 모달 */}
+      {historyModalEmp && (
+        <PartnerWorkHistoryModal
+          employee={historyModalEmp}
+          workType={workTypes.find((w) => w.id === historyModalEmp.workTypeId)}
+          attendanceRecords={attendanceRecords}
+          onClose={() => setHistoryModalEmp(null)}
         />
       )}
 
